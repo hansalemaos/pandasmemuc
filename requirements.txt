@@ -1,0 +1,9 @@
+PrettyColorPrinter
+a_pandas_ex_apply_ignore_exceptions
+a_pandas_ex_xml2df
+adbkit
+flexible_partial
+pandas
+regex
+reggisearch
+subprocesskiller
