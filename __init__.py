@@ -3062,7 +3062,12 @@ class MeMuc:
         bluestacks_divider=32767,
     ):
         df2 = self.df.loc[self.df.aa_index == i]
-        df2.bb_adbtools.iloc[0].aa_update_screenshot()
+        try:
+            df2.bb_adbtools.iloc[0].aa_update_screenshot()
+        except Exception:
+            print('Could not get screenshot')
+            save_screenshot = False
+            screenshotfolder = None
         df3 = df2.bb_adbtools.iloc[0].aa_get_all_displayed_items_from_uiautomator(
             screenshotfolder=screenshotfolder,
             max_variation_percent_x=max_variation_percent_x,
