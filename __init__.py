@@ -65,50 +65,66 @@ def tempfolder_and_files(fileprefix="tmp_", numberoffiles=1, suffix=".bin", zfil
 def get_hosts_files(
     allhosts=(
         "https://adaway.org/hosts.txt",
-        "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
-        "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
-        "https://winhelp2002.mvps.org/hosts.txt",
+        # "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+        # "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
+        # "https://winhelp2002.mvps.org/hosts.txt",
     )
 ):
+    if not isiter(allhosts):
+        allhosts = [allhosts]
     allurls = []
     for url in allhosts:
-        try:
-            resp = requests.get(url)
+        if os.path.exists(url):
+            with open(url,mode='r',encoding='utf-8') as f:
+                allurls.extend(
+                    [
+                        tuple(x.strip().split(maxsplit=1))
+                        for x in f.read().splitlines()
+                        if x and x[0] != "#"
+                    ]
+                )
+        else:
+            try:
+                resp = requests.get(url)
 
-            allurls.extend(
-                [
-                    tuple(x.strip().split(maxsplit=1))
-                    for x in resp.content.decode("utf-8").splitlines()
-                    if x and x[0] != "#"
-                ]
-            )
-        except Exception as fe:
-            print(fe)
-            continue
-    df = pd.DataFrame(sorted(list(set(allurls))))
-    df = df.loc[df[0] == "0.0.0.0"]
-    df = df.drop(df.loc[(df[0] == "0.0.0.0") & (df[1] == "0.0.0.0")].index[0])
+                allurls.extend(
+                    [
+                        tuple(x.strip().split(maxsplit=1))
+                        for x in resp.content.decode("utf-8").splitlines()
+                        if x and x[0] != "#"
+                    ]
+                )
+            except Exception as fe:
+                print(fe)
+                continue
+    if len(allhosts) > 1:
 
-    newhostheader = """
-    127.0.0.1 localhost
-    127.0.0.1 localhost.localdomain
-    127.0.0.1 local
-    255.255.255.255 broadcasthost
-    ::1 localhost
-    ::1 ip6-localhost
-    ::1 ip6-loopback
-    fe80::1%lo0 localhost
-    ff00::0 ip6-localnet
-    ff00::0 ip6-mcastprefix
-    ff02::1 ip6-allnodes
-    ff02::2 ip6-allrouters
-    ff02::3 ip6-allhosts
-    0.0.0.0 0.0.0.0""".strip()
+        df = pd.DataFrame(sorted(list(set(allurls))))
+        df = df.loc[(df[0] == "0.0.0.0") | (df[0] == "127.0.0.1")]
+        df = df.drop(df.loc[(df[0] == "0.0.0.0") & (df[1] == "0.0.0.0")].index[0])
 
-    newhost = "\n".join(
-        [x[0] + " " + x[1] for x in zip(df[0].to_list(), df[1].to_list())]
-    )
-    newhost = newhostheader + "\n" + newhost
+        newhostheader = """
+        127.0.0.1 localhost
+        127.0.0.1 localhost.localdomain
+        127.0.0.1 local
+        255.255.255.255 broadcasthost
+        ::1 localhost
+        ::1 ip6-localhost
+        ::1 ip6-loopback
+        fe80::1%lo0 localhost
+        ff00::0 ip6-localnet
+        ff00::0 ip6-mcastprefix
+        ff02::1 ip6-allnodes
+        ff02::2 ip6-allrouters
+        ff02::3 ip6-allhosts
+        0.0.0.0 0.0.0.0""".strip()
+
+        newhost = "\n".join(
+            [x[0] + " " + x[1] for x in zip(df[0].to_list(), df[1].to_list())]
+        )
+        newhost = newhostheader + "\n" + newhost
+    else:
+        newhost = '\n'.join([' '.join(list(x)) for x in allurls])
     fo = tempfolder_and_files(fileprefix="", numberoffiles=0, suffix="", zfill=0)[-1]
     if not os.path.exists(fo):
         os.makedirs(fo)
