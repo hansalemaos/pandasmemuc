@@ -1,6 +1,5 @@
 import random
 import sys
-from time import sleep
 import regex
 from flexible_partial import FlexiblePartialOwnName
 from adbkit import ADBTools
@@ -8,12 +7,18 @@ import subprocess
 import io
 
 from reggisearch import search_values
-import os
 from a_pandas_ex_apply_ignore_exceptions import pd_add_apply_ignore_exceptions
 from subprocesskiller import subprocess_timeout
 from a_pandas_ex_xml2df import pd_add_read_xml_files
 import pandas as pd
 from PrettyColorPrinter import add_printer
+import os
+import tempfile
+from time import sleep
+
+import requests
+from touchtouch import touch
+from isiter import isiter
 
 add_printer(1)
 pd_add_read_xml_files()
@@ -36,6 +41,81 @@ adb_path = memucfolder + "adb.exe"
 phoneconfig = sys.modules[__name__]
 phoneconfig.phone_dataframe = pd.DataFrame()
 phoneconfig.mac_address_prefix = "52:54:00"
+
+
+def tempfolder_and_files(fileprefix="tmp_", numberoffiles=1, suffix=".bin", zfill=8):
+    tempfolder = tempfile.TemporaryDirectory()
+    tempfolder.cleanup()
+    allfiles = []
+
+    for fi in range(numberoffiles):
+        tempfile____txtlist = os.path.join(
+            tempfolder.name, f"{fileprefix}_{str(fi).zfill(zfill)}{suffix}"
+        )
+        allfiles.append(tempfile____txtlist)
+        touch(tempfile____txtlist)
+
+    return (
+        [(k,) for k in allfiles],
+        tempfolder.name.split(os.sep)[-1],
+        tempfolder.name,
+    )
+
+
+def get_hosts_files(
+    allhosts=(
+        "https://adaway.org/hosts.txt",
+        "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+        "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
+        "https://winhelp2002.mvps.org/hosts.txt",
+    )
+):
+    allurls = []
+    for url in allhosts:
+        try:
+            resp = requests.get(url)
+
+            allurls.extend(
+                [
+                    tuple(x.strip().split(maxsplit=1))
+                    for x in resp.content.decode("utf-8").splitlines()
+                    if x and x[0] != "#"
+                ]
+            )
+        except Exception as fe:
+            print(fe)
+            continue
+    df = pd.DataFrame(sorted(list(set(allurls))))
+    df = df.loc[df[0] == "0.0.0.0"]
+    df = df.drop(df.loc[(df[0] == "0.0.0.0") & (df[1] == "0.0.0.0")].index[0])
+
+    newhostheader = """
+    127.0.0.1 localhost
+    127.0.0.1 localhost.localdomain
+    127.0.0.1 local
+    255.255.255.255 broadcasthost
+    ::1 localhost
+    ::1 ip6-localhost
+    ::1 ip6-loopback
+    fe80::1%lo0 localhost
+    ff00::0 ip6-localnet
+    ff00::0 ip6-mcastprefix
+    ff02::1 ip6-allnodes
+    ff02::2 ip6-allrouters
+    ff02::3 ip6-allhosts
+    0.0.0.0 0.0.0.0""".strip()
+
+    newhost = "\n".join(
+        [x[0] + " " + x[1] for x in zip(df[0].to_list(), df[1].to_list())]
+    )
+    newhost = newhostheader + "\n" + newhost
+    fo = tempfolder_and_files(fileprefix="", numberoffiles=0, suffix="", zfill=0)[-1]
+    if not os.path.exists(fo):
+        os.makedirs(fo)
+    hostfile = os.path.normpath(os.path.join(fo, "hosts"))
+    with open(hostfile, "w", newline="\n", encoding="utf-8") as f:
+        f.write(newhost)
+    return hostfile
 
 
 def connect_adb_tools(x):
@@ -83,12 +163,23 @@ def set_value(index, key, value):
 def list_all_emulators():
     p = run_subprocess("listvms")
     i = io.StringIO(p.stdout.decode("utf-8").strip())
-    return pd.read_csv(
+    dfr = pd.read_csv(
         i,
         header=None,
         names=["aa_index", "aa_title", "aa_handle", "aa_status", "aa_pid"],
         sep=",",
     )
+    df2 = dfr.ds_apply_ignore(
+        pd.NA,
+        lambda x: subprocess.run(
+            [memuc, "rename", "-i", str(x.aa_index), str(x.aa_title)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ),
+        axis=1,
+    )
+    #print(df2)
+    return dfr
 
 
 def get_all_config(df):
@@ -471,9 +562,13 @@ def get_all_config(df):
         dfxax = pd.Q_Xml2df(
             dfallinfos.cc_Config_file.iloc[acc], add_xpath_and_snippet=False
         ).reset_index()
-        nameindex = dfxax.loc[dfxax.aa_value.str.contains("name_tag", na=False)].index[
-            0
-        ]
+        try:
+            nameindex = dfxax.loc[
+                dfxax.aa_value.str.contains("name_tag", na=False)
+            ].index[0]
+        except Exception as fe:
+            print(fe)
+            continue
         nameacc = ""
         for key, item in dfxax[nameindex:].iterrows():
             if "value" in item["aa_all_keys"]:
@@ -2982,6 +3077,78 @@ class MeMuc:
         self.change_config(0)
         return self
 
+    def patch_hosts(
+        self,
+        vms_aa_index,
+        hostfiles=(
+            "https://adaway.org/hosts.txt",
+            "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+            "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
+            "https://winhelp2002.mvps.org/hosts.txt",
+        ),
+    ):
+        hostfile = get_hosts_files(allhosts=hostfiles)
+
+        if not isiter(vms_aa_index):
+            vms_aa_index = [vms_aa_index]
+        df2 = self.df.loc[self.df.aa_index.isin(vms_aa_index)]
+        suenabled = df2.loc[df2.aa_enable_su == "1"]
+        sudisabled = df2.loc[df2.aa_enable_su == "0"]
+        for key, item in suenabled.iterrows():
+            aa_index = item.aa_index
+            item.bb_start()
+            sleep(3)
+
+            self2 = pd.DataFrame()
+            while self2.empty:
+                self23 = self.__class__()
+                self2 = self23.loc[self23.aa_index == aa_index]
+                if pd.isna(self2.iloc[0].bb_adbtools):
+                    self2 = pd.DataFrame()
+            self2.iloc[0].bb_adbtools.aa_execute_non_shell_adb_command("remount")
+            self2.iloc[0].bb_adbtools.aa_enable_root()
+            self2.iloc[0].bb_adbtools.aa_execute_multiple_adb_shell_commands(
+                ["rm ./etc/hosts"]
+            )
+            self2.iloc[0].bb_adbtools.aa_push_file_to_path(hostfile, "./etc")
+            print(
+                f"len of host file: {len(self2.iloc[0].bb_adbtools.aa_execute_multiple_adb_shell_commands(['cat ./etc/hosts']))}"
+            )
+            item.bb_stop()
+
+        for key, item in sudisabled.iterrows():
+            aa_index = item.aa_index
+            for ita in range(2):
+                item.bb_stop()
+                item.set_enable_su(1)
+                item.bb_start()
+                sleep(3)
+                self2 = pd.DataFrame()
+                while self2.empty:
+                    self23 = self.__class__()
+                    self2 = self23.loc[self23.aa_index == aa_index]
+                    if pd.isna(self2.iloc[0].bb_adbtools):
+                        self2 = pd.DataFrame()
+                self2.iloc[0].bb_adbtools.aa_execute_non_shell_adb_command("remount")
+                self2.iloc[0].bb_adbtools.aa_enable_root()
+                self2.iloc[0].bb_adbtools.aa_execute_multiple_adb_shell_commands(
+                    ["rm ./etc/hosts"]
+                )
+                self2.iloc[0].bb_adbtools.aa_push_file_to_path(hostfile, "./etc")
+                if ita ==1:
+                    print(
+                        f"len of host file: {len(self2.iloc[0].bb_adbtools.aa_execute_multiple_adb_shell_commands(['cat ./etc/hosts']))}"
+                    )
+                    self2.iloc[0].set_enable_su(0)
+                item.bb_stop()
+
+        try:
+            os.remove(hostfile)
+
+        except Exception:
+            pass
+        self.update_status()
+        return self
     def change_config(self, i):
         self.df.iloc[i].set_enable_audio(0)
         try:
@@ -3065,7 +3232,7 @@ class MeMuc:
         try:
             df2.bb_adbtools.iloc[0].aa_update_screenshot()
         except Exception:
-            print('Could not get screenshot')
+            print("Could not get screenshot")
             save_screenshot = False
             screenshotfolder = None
         df3 = df2.bb_adbtools.iloc[0].aa_get_all_displayed_items_from_uiautomator(
