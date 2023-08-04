@@ -1,5 +1,7 @@
 import random
 import sys
+import time
+
 import regex
 from flexible_partial import FlexiblePartialOwnName
 from adbkit import ADBTools
@@ -62,75 +64,49 @@ def tempfolder_and_files(fileprefix="tmp_", numberoffiles=1, suffix=".bin", zfil
     )
 
 
-def get_hosts_files(
-    allhosts=(
-        "https://adaway.org/hosts.txt",
-        # "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
-        # "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
-        # "https://winhelp2002.mvps.org/hosts.txt",
-    )
-):
+def get_hosts_files(allhosts):
     if not isiter(allhosts):
         allhosts = [allhosts]
+    # allhosts = (
+    #     "https://adaway.org/hosts.txt",
+    #     "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+    #     "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
+    #     "https://winhelp2002.mvps.org/hosts.txt",
+    # )
     allurls = []
     for url in allhosts:
-        if os.path.exists(url):
-            with open(url,mode='r',encoding='utf-8') as f:
-                allurls.extend(
-                    [
-                        tuple(x.strip().split(maxsplit=1))
-                        for x in f.read().splitlines()
-                        if x and x[0] != "#"
-                    ]
-                )
-        else:
-            try:
-                resp = requests.get(url)
+        resp = requests.get(url)
 
-                allurls.extend(
-                    [
-                        tuple(x.strip().split(maxsplit=1))
-                        for x in resp.content.decode("utf-8").splitlines()
-                        if x and x[0] != "#"
-                    ]
-                )
-            except Exception as fe:
-                print(fe)
-                continue
-    if len(allhosts) > 1:
-
-        df = pd.DataFrame(sorted(list(set(allurls))))
-        df = df.loc[(df[0] == "0.0.0.0") | (df[0] == "127.0.0.1")]
-        df = df.drop(df.loc[(df[0] == "0.0.0.0") & (df[1] == "0.0.0.0")].index[0])
-
-        newhostheader = """
-        127.0.0.1 localhost
-        127.0.0.1 localhost.localdomain
-        127.0.0.1 local
-        255.255.255.255 broadcasthost
-        ::1 localhost
-        ::1 ip6-localhost
-        ::1 ip6-loopback
-        fe80::1%lo0 localhost
-        ff00::0 ip6-localnet
-        ff00::0 ip6-mcastprefix
-        ff02::1 ip6-allnodes
-        ff02::2 ip6-allrouters
-        ff02::3 ip6-allhosts
-        0.0.0.0 0.0.0.0""".strip()
-
-        newhost = "\n".join(
-            [x[0] + " " + x[1] for x in zip(df[0].to_list(), df[1].to_list())]
+        allurls.extend(
+            [
+                tuple(x.strip().split(maxsplit=1))
+                for x in resp.content.decode("utf-8").splitlines()
+                if x and x[0] != "#"
+            ]
         )
-        newhost = newhostheader + "\n" + newhost
-    else:
-        newhost = '\n'.join([' '.join(list(x)) for x in allurls])
+
+    df = pd.DataFrame(allurls)
+    df = df.drop(
+        df.loc[
+            ((df[0] == "127.0.0.1") & (df[1] == "localhost"))
+            | ((df[0] == "::1") & (df[1] == "localhost"))
+        ].index
+    )
+    df[0] = "127.0.0.1"
+    df = df.drop_duplicates()
+    df = pd.concat(
+        [pd.DataFrame([["127.0.0.1", "localhost"], ["::1", "localhost"]]), df],
+        ignore_index=True,
+    )
+    newhost = "\n".join(
+        [x[0] + " " + x[1] for x in zip(df[0].to_list(), df[1].to_list())]
+    )
     fo = tempfolder_and_files(fileprefix="", numberoffiles=0, suffix="", zfill=0)[-1]
     if not os.path.exists(fo):
         os.makedirs(fo)
     hostfile = os.path.normpath(os.path.join(fo, "hosts"))
     with open(hostfile, "w", newline="\n", encoding="utf-8") as f:
-        f.write(newhost)
+        f.write(newhost.strip())
     return hostfile
 
 
@@ -194,7 +170,7 @@ def list_all_emulators():
         ),
         axis=1,
     )
-    #print(df2)
+    # print(df2)
     return dfr
 
 
@@ -235,6 +211,7 @@ def get_all_config(df):
         "selected_map",
         "longitude",
         "latitude",
+        "show_tabbar",
     ]
     df2 = df.ds_apply_ignore(
         pd.NA,
@@ -251,6 +228,7 @@ def get_all_config(df):
         axis=1,
         result_type="expand",
     )
+
     df2.columns = [f"aa_{x}" for x in configcmds]
     df = pd.concat([df, df2], axis=1, ignore_index=False)
     df2 = df.ds_apply_ignore(
@@ -2808,6 +2786,234 @@ class DfDescriptor:
         self.name = name
 
 
+def remove_cache(adb_path, deviceserial):
+    # adb_path = normp(adb_path)
+    pro1 = (
+        subprocess.run(
+            f"""\"{adb_path}\" -s {deviceserial} shell su -c \'rm -r -f /data/dalvik-cache\'""",
+            capture_output=True,
+            shell=True,
+        )
+    ).stdout
+    pro2 = (
+        subprocess.run(
+            f"""\"{adb_path}\" -s {deviceserial} shell su -c \'for cache in /data/user*/*/*/cache/*; do rm -rf "$cache"; done\'""",
+            capture_output=True,
+            shell=True,
+        )
+    ).stdout
+    print(pro1)
+    print(pro2)
+
+
+def install_instance_patch_host(
+    alldevices,
+    aa_index,
+    timeout=120,
+    addkillerlink="https://github.com/AdAway/AdAway/releases/download/v6.1.1/AdAway-6.1.1-20230620.apk",
+):
+    addkiller = os.path.normpath(os.path.join(os.getcwd(), "awa.apk"))
+    if not os.path.exists(addkiller):
+        with requests.get(addkillerlink) as res:
+            with open(addkiller, mode="wb") as f:
+                f.write(res.content)
+    if not isiter(aa_index):
+        aa_index = [aa_index]
+    alldevices.df = alldevices.df.loc[alldevices.df.aa_index.isin(aa_index)]
+    devices = alldevices
+    for indi in range(len(devices.df)):
+        try:
+            devices.iloc[indi].bb_stop()
+            devices.cc_UUID.apply(
+                lambda x: subprocess.run(
+                    [
+                        memumanage,
+                        "storagectl",
+                        f"{{{x}}}",
+                        "--name",
+                        "IDE",
+                        "--hostiocache",
+                        "on",
+                    ]
+                )
+            )
+            devices.name_intern.apply(
+                lambda x: subprocess.run(
+                    [memumanage, "guestproperty", "set", str(x), "show_tabbar", "0"]
+                )
+            )
+            devices.name_intern.apply(
+                lambda x: subprocess.run(
+                    [
+                        memumanage,
+                        "guestproperty",
+                        "set",
+                        str(x),
+                        "graphics_render_mode",
+                        "0",
+                    ]
+                )
+            )
+            devices.name_intern.apply(
+                lambda x: subprocess.run(
+                    [memumanage, "guestproperty", "set", str(x), "vsync", "0"]
+                )
+            )
+            devices.name_intern.apply(
+                lambda x: subprocess.run(
+                    [memumanage, "guestproperty", "set", str(x), "windpi_scale", "0"]
+                )
+            )
+
+            devices.cc_UUID.apply(
+                lambda x: subprocess.run(
+                    [
+                        memumanage,
+                        "setextradata",
+                        f"{{{x}}}",
+                        "GUI/SaveMountedAtRuntime",
+                        "on",
+                    ]
+                )
+            )
+            devices.iloc[indi].set_enable_audio(0)
+
+            devices.iloc[indi].set_enable_su(1)
+            devices.iloc[indi].bb_start()
+            devices.iloc[indi].bb_uninstallapp("org.adaway")
+            devices.iloc[indi].bb_installapp(addkiller)
+            # devices.iloc[indi].bb_reboot()
+            devices.iloc[indi].bb_startapp("org.adaway")
+            alldevices.update_status()
+            alldevices.df = alldevices.df.loc[alldevices.df.aa_index.isin(aa_index)]
+            devices = alldevices
+            devices.iloc[indi].bb_startapp("org.adaway")
+            sleep(2)
+            while True:
+                try:
+                    df2 = devices.iloc[
+                        indi
+                    ].bb_adbtools.aa_get_all_displayed_items_from_uiautomator()
+                    df2.loc[
+                        df2.bb_resource_id == "org.adaway:id/rootMethodTextView"
+                    ].iloc[0].ff_bb_tap_exact_center()
+                    break
+                except Exception as fe:
+                    alldevices.update_status()
+                    alldevices.df = alldevices.df.loc[
+                        alldevices.df.aa_index.isin(aa_index)
+                    ]
+                    devices = alldevices
+                    devices.iloc[indi].bb_startapp("org.adaway")
+
+                    print(fe)
+
+            while True:
+                try:
+                    df2 = devices.iloc[
+                        indi
+                    ].bb_adbtools.aa_get_all_displayed_items_from_uiautomator()
+                    df2.loc[df2.bb_resource_id == "org.adaway:id/next_button"].iloc[
+                        0
+                    ].ff_bb_tap_exact_center()
+                    sleep(1)
+                    df2.loc[df2.bb_resource_id == "org.adaway:id/next_button"].iloc[
+                        0
+                    ].ff_bb_tap_exact_center()
+                    break
+                except Exception as fe:
+                    devices.iloc[indi].bb_startapp("org.adaway")
+
+                    print(fe)
+
+            endscre = pd.DataFrame()
+            while endscre.empty:
+                try:
+                    for _ in range(5):
+                        df2.loc[df2.bb_resource_id == "org.adaway:id/next_button"].iloc[
+                            0
+                        ].ff_bb_tap_exact_center()
+                        sleep(0.5)
+                    df5 = devices.iloc[
+                        indi
+                    ].bb_adbtools.aa_get_all_displayed_items_from_uiautomator()
+                    endscre = df5.loc[
+                        df5.bb_resource_id == "org.adaway:id/allowedHostCardView"
+                    ]
+                except Exception as fe:
+                    devices.iloc[indi].bb_startapp("org.adaway")
+
+                    print(fe)
+
+            dfp = devices.iloc[indi].bb_adbtools.aa_list_all_packages()
+            dfp = dfp.loc[~dfp.aa_path.str.contains("adaway")]
+
+            (
+                devices.iloc[indi].bb_adbtools.aa_execute_multiple_adb_shell_commands(
+                    dfp.aa_name.apply(lambda x: f"am force-stop {x}").to_list()
+                )
+            )
+
+            devices.iloc[indi].bb_startapp("org.adaway")
+            sleep(3)
+            devices.iloc[indi].bb_sendkey("home")
+            dfp = devices.iloc[indi].bb_adbtools.aa_list_all_packages()
+            dfp = dfp.loc[~dfp.aa_path.str.contains("adaway")]
+            (
+                devices.iloc[indi].bb_adbtools.aa_execute_multiple_adb_shell_commands(
+                    dfp.aa_name.apply(lambda x: f"am force-stop {x}").to_list()
+                )
+            )
+            devices.iloc[indi].bb_stop()
+            devices.iloc[indi].set_enable_su(0)
+            devices.iloc[indi].bb_start()
+
+            devices.iloc[indi].bb_startapp(
+                "com.android.internal.display.cutout.emulation.tall"
+            )
+            devices.iloc[indi].bb_startapp(
+                "com.android.internal.display.cutout.emulation.corner"
+            )
+            devices.iloc[indi].bb_startapp(
+                "com.android.internal.display.cutout.emulation.double"
+            )
+
+            alldevices.update_status()
+            alldevices.df = alldevices.df.loc[alldevices.df.aa_index.isin(aa_index)]
+            devices = alldevices
+            while pd.isna(devices.iloc[indi].bb_adbtools):
+                alldevices.update_status()
+                alldevices.df = alldevices.df.loc[alldevices.df.aa_index.isin(aa_index)]
+                devices = alldevices
+            timeoutfinal = time.time() + timeout
+            try:
+                while devices.iloc[indi].bb_adbtools.aa_get_display_orientation() != 3:
+                    sleep(1)
+                    print(
+                        "Waiting for a vertical ad. If you are seeing a horizontal ad, you can skip by pressing ctrl+c"
+                    )
+                    if timeoutfinal < time.time():
+                        break
+                    continue
+            except KeyboardInterrupt:
+                for r in range(3):
+                    try:
+                        sleep(1)
+                    except:
+                        sleep(1)
+                        continue
+                devices.iloc[indi].bb_sendkey("home")
+            sleep(3)
+            timeoutfinal = time.time() + timeout
+            while devices.iloc[indi].bb_adbtools.aa_get_display_orientation() == 3:
+                devices.iloc[indi].bb_sendkey("home")
+                if timeoutfinal < time.time():
+                    break
+                sleep(0.5)
+        except Exception as fe:
+            print(fe)
+
+
 class MeMuc:
     aa_index = DfDescriptor()
     aa_title = DfDescriptor()
@@ -2918,7 +3124,11 @@ class MeMuc:
     set_latitude = DfDescriptor()
 
     def __init__(self):
-        self.df = get_all_config(list_all_emulators())
+        try:
+            self.df = get_all_config(list_all_emulators())
+        except ValueError:
+            print("No instances found, creating one")
+            self.create_vm_96(timeout=120)
         self.df = self.df.drop(
             columns=[
                 "set_pid",
@@ -3096,75 +3306,15 @@ class MeMuc:
     def patch_hosts(
         self,
         vms_aa_index,
-        hostfiles=(
-            "https://adaway.org/hosts.txt",
-            "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
-            "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
-            "https://winhelp2002.mvps.org/hosts.txt",
-        ),
+        timeout=120,
+        addkillerlink="https://github.com/AdAway/AdAway/releases/download/v6.1.1/AdAway-6.1.1-20230620.apk",
     ):
-        hostfile = get_hosts_files(allhosts=hostfiles)
-
-        if not isiter(vms_aa_index):
-            vms_aa_index = [vms_aa_index]
-        df2 = self.df.loc[self.df.aa_index.isin(vms_aa_index)]
-        suenabled = df2.loc[df2.aa_enable_su == "1"]
-        sudisabled = df2.loc[df2.aa_enable_su == "0"]
-        for key, item in suenabled.iterrows():
-            aa_index = item.aa_index
-            item.bb_start()
-            sleep(3)
-
-            self2 = pd.DataFrame()
-            while self2.empty:
-                self23 = self.__class__()
-                self2 = self23.loc[self23.aa_index == aa_index]
-                if pd.isna(self2.iloc[0].bb_adbtools):
-                    self2 = pd.DataFrame()
-            self2.iloc[0].bb_adbtools.aa_execute_non_shell_adb_command("remount")
-            self2.iloc[0].bb_adbtools.aa_enable_root()
-            self2.iloc[0].bb_adbtools.aa_execute_multiple_adb_shell_commands(
-                ["rm ./etc/hosts"]
-            )
-            self2.iloc[0].bb_adbtools.aa_push_file_to_path(hostfile, "./etc")
-            print(
-                f"len of host file: {len(self2.iloc[0].bb_adbtools.aa_execute_multiple_adb_shell_commands(['cat ./etc/hosts']))}"
-            )
-            item.bb_stop()
-
-        for key, item in sudisabled.iterrows():
-            aa_index = item.aa_index
-            for ita in range(2):
-                item.bb_stop()
-                item.set_enable_su(1)
-                item.bb_start()
-                sleep(3)
-                self2 = pd.DataFrame()
-                while self2.empty:
-                    self23 = self.__class__()
-                    self2 = self23.loc[self23.aa_index == aa_index]
-                    if pd.isna(self2.iloc[0].bb_adbtools):
-                        self2 = pd.DataFrame()
-                self2.iloc[0].bb_adbtools.aa_execute_non_shell_adb_command("remount")
-                self2.iloc[0].bb_adbtools.aa_enable_root()
-                self2.iloc[0].bb_adbtools.aa_execute_multiple_adb_shell_commands(
-                    ["rm ./etc/hosts"]
-                )
-                self2.iloc[0].bb_adbtools.aa_push_file_to_path(hostfile, "./etc")
-                if ita ==1:
-                    print(
-                        f"len of host file: {len(self2.iloc[0].bb_adbtools.aa_execute_multiple_adb_shell_commands(['cat ./etc/hosts']))}"
-                    )
-                    self2.iloc[0].set_enable_su(0)
-                item.bb_stop()
-
-        try:
-            os.remove(hostfile)
-
-        except Exception:
-            pass
+        install_instance_patch_host(
+            self, vms_aa_index, timeout=timeout, addkillerlink=addkillerlink
+        )
         self.update_status()
         return self
+
     def change_config(self, i):
         self.df.iloc[i].set_enable_audio(0)
         try:
