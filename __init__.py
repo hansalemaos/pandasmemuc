@@ -3306,7 +3306,7 @@ class MeMuc:
     def patch_hosts(
         self,
         vms_aa_index,
-        timeout=120,
+        timeout=60,
         addkillerlink="https://github.com/AdAway/AdAway/releases/download/v6.1.1/AdAway-6.1.1-20230620.apk",
     ):
         install_instance_patch_host(
@@ -3320,29 +3320,26 @@ class MeMuc:
         try:
             sa = phoneconfig.phone_dataframe.sample(1)
 
-            self.df.iloc[i].set_linenum(sa.phone_number.iloc[0])
-            self.df.iloc[i].set_imei(sa.imei.iloc[0])
-            self.df.iloc[i].set_imsi(sa.cc_imsi.iloc[0])
-            self.df.iloc[i].set_simserial(sa.cc_simerial.iloc[0])
+            self.iloc[i].set_memory(sa.iloc[0].aa_ram_totalmem)
+            self.iloc[i].set_resolution_width(sa.iloc[0].aa_width)
+            self.iloc[i].set_resolution_height(sa.iloc[0].aa_height)
+            self.iloc[i].set_vbox_dpi(sa.iloc[0].aa_screen_densities)
+            self.iloc[i].set_linenum(f'+{sa.iloc[0].cc_phone_number}')
+            self.iloc[i].set_imei(sa.iloc[0].cc_imei)
+            self.iloc[i].set_imsi(sa.iloc[0].cc_imsi)
+            self.iloc[i].set_simserial(sa.iloc[0].cc_iccid)
+            self.iloc[i].set_microvirt_vm_brand(sa.iloc[0].aa_brand)
+            self.iloc[i].set_microvirt_vm_manufacturer(sa.iloc[0].aa_manufacturer)
+            self.iloc[i].set_microvirt_vm_model(" ".join(sa.iloc[0].aa_model_name.split()))
+            self.iloc[i].modifyvm_macaddress(
+                1,
+                (
+                        sa.iloc[0].cc_macaddress
+                ).replace(":", ""),
+            )
+
         except Exception:
             pass
-
-        self.df.modifyvm_macaddress.iloc[0](
-            1,
-            (
-                str(phoneconfig.mac_address_prefix)
-                + ":%02x:%02x:%02x" % tuple(random.randint(0, 255) for v in range(3))
-            ).replace(":", ""),
-        )
-
-        self.df.modifyvm_macaddress.iloc[0](
-            2,
-            (
-                str(phoneconfig.mac_address_prefix)
-                + ":%02x:%02x:%02x" % tuple(random.randint(0, 255) for v in range(3))
-            ).replace(":", ""),
-        )
-        self.df.iloc[i].set_enable_su(0)
 
         self.df = get_all_config(list_all_emulators())
         return self
@@ -3373,6 +3370,17 @@ class MeMuc:
 
     def create_vm_96(self, timeout=120):
         self._create_vm(v="96", timeout=timeout)
+        return self
+
+    def create_vm_96_and_patch(self, timeout=120):
+        oldones = set(self.df.aa_index.to_list())
+        self._create_vm(v="96", timeout=timeout)
+        machinelist=self.df.aa_index.to_list()
+        aindex=list(set(machinelist) - oldones)[0]
+        self.patch_hosts([aindex])
+        iindex=self.df.loc[self.df.aa_index == aindex].index[0]
+        self.df.loc[self.df.aa_index == aindex].bb_stop.iloc[0]()
+        self.change_config(iindex)
         return self
 
     def get_ui_automator_df(
